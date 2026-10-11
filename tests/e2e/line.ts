@@ -264,6 +264,23 @@ attributeLayer.setTransform(orthographicTransform({ min: 24, max: 32 }, { min: 2
 attribute.renderNow();
 const widthAtZoom4 = litRows(readback(attribute), 44).length;
 
+// ---- leave the page showing the scene that was compared ------------------
+//
+// The phases above each end with the canvas in whatever state they needed, which
+// means a human opening this page — or a screenshot of it — would see the two
+// channels rendering *different* pictures and reasonably conclude they disagree.
+// Re-drawing the comparison scene last makes the page self-describing.
+//
+// This is safe for every assertion: each number above came from a readback taken
+// during its own phase, and none of them is recomputed here.
+
+attributeLayer.clear();
+textureLayer.clear();
+populate(attributeLayer);
+populate(textureLayer);
+attribute.renderNow();
+texture.renderNow();
+
 // ---- teardown ------------------------------------------------------------
 
 const liveBeforeDestroy = attribute.stats().resources.live + texture.stats().resources.live;

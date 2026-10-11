@@ -3,14 +3,51 @@
   <head>
     <meta charset="utf-8" />
     <title>as-charts · line channels smoke</title>
+    <style>
+      /* The drawing buffer stays 64x64 so pixel indices are predictable; the CSS
+         scale only enlarges the bitmap for a human looking at the page. */
+      body {
+        margin: 8px;
+        background: #0b0d10;
+        color: #d6dae0;
+        font:
+          11px/1.45 ui-monospace,
+          monospace;
+      }
+      canvas {
+        width: 192px;
+        height: 192px;
+        image-rendering: pixelated;
+        border: 1px solid #2a2f36;
+        vertical-align: top;
+      }
+      figure {
+        display: inline-block;
+        margin: 0 12px 0 0;
+      }
+      figcaption {
+        padding-top: 4px;
+        color: #8b949e;
+      }
+      pre {
+        white-space: pre-wrap;
+        max-width: 760px;
+      }
+    </style>
   </head>
   <body data-status="pending">
     <pre id="result">pending</pre>
     <!-- Two contexts: one per data channel. Same scene, same transform, same
          thickness — so any difference in the readback is a difference between the
          channels and nothing else. -->
-    <canvas id="stage-attribute" width="64" height="64"></canvas>
-    <canvas id="stage-texture" width="64" height="64"></canvas>
+    <figure>
+      <canvas id="stage-attribute" width="64" height="64"></canvas>
+      <figcaption>pointSource: attribute</figcaption>
+    </figure>
+    <figure>
+      <canvas id="stage-texture" width="64" height="64"></canvas>
+      <figcaption>pointSource: texture</figcaption>
+    </figure>
     <script type="module" src="./line.ts"></script>
   </body>
 </html>
