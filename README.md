@@ -135,6 +135,7 @@ Vite 8 · TypeScript · Vitest · ESLint · Prettier · commitlint · lint-stage
 npm run docs:dev
 ```
 
+- [API 稳定性契约](docs/api-stability.md) —— 三条不可破坏契约，动手前先读这个
 - [快速上手](docs/guide/quick-start.md)
 - [定位与取舍](docs/guide/positioning.md)
 - [渲染模型：脏标记与帧调度](docs/architecture/rendering-model.md)
@@ -143,6 +144,7 @@ npm run docs:dev
 - [性能门禁](docs/performance/gates.md)
 - [测试基础设施](docs/engineering/test-harness.md)
 - [里程碑](docs/roadmap.md)
+- [变更日志](CHANGELOG.md)
 
 ## 工程约束
 

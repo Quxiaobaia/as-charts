@@ -31,9 +31,17 @@ export default defineConfig({
       {
         text: '工程',
         items: [
+          { text: 'API 稳定性契约', link: '/api-stability' },
           { text: '性能门禁', link: '/performance/gates' },
           { text: '测试基础设施', link: '/engineering/test-harness' },
           { text: '里程碑', link: '/roadmap' },
+          {
+            // The changelog lives at the repo root by convention, so it is not a
+            // VitePress page — link straight to the rendered file on GitHub
+            // instead of duplicating it into docs/.
+            text: '变更日志',
+            link: 'https://github.com/Quxiaobaia/as-charts/blob/main/CHANGELOG.md',
+          },
         ],
       },
     ],
