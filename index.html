@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>as-charts · M0 内核演练场</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0e1116;
+        --panel: #161b22;
+        --line: #262c36;
+        --text: #e6edf3;
+        --muted: #8b949e;
+        --accent: #58a6ff;
+        --warn: #f0883e;
+        --hot: #f85149;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        font:
+          14px/1.6 ui-sans-serif,
+          system-ui,
+          -apple-system,
+          'Segoe UI',
+          'PingFang SC',
+          'Microsoft YaHei',
+          sans-serif;
+      }
+
+      header {
+        padding: 18px 24px 0;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+      }
+
+      header p {
+        margin: 4px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      main {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        gap: 16px;
+        padding: 16px 24px 24px;
+        align-items: start;
+      }
+
+      @media (max-width: 900px) {
+        main {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+
+      #stage {
+        width: 100%;
+        height: 480px;
+        display: block;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #05070a;
+        cursor: crosshair;
+      }
+
+      aside {
+        display: grid;
+        gap: 12px;
+      }
+
+      section {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: 12px 14px;
+      }
+
+      section h2 {
+        margin: 0 0 10px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+
+      dl {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 2px 12px;
+        margin: 0;
+        font-variant-numeric: tabular-nums;
+      }
+
+      dt {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      dd {
+        margin: 0;
+        text-align: right;
+        font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+        font-size: 12px;
+      }
+
+      dd.hot {
+        color: var(--warn);
+      }
+
+      dd.zero {
+        color: var(--muted);
+      }
+
+      label {
+        display: grid;
+        gap: 4px;
+        font-size: 12px;
+        color: var(--muted);
+        margin-bottom: 10px;
+      }
+
+      label:last-child {
+        margin-bottom: 0;
+      }
+
+      label b {
+        color: var(--text);
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+      }
+
+      input[type='range'] {
+        width: 100%;
+        accent-color: var(--accent);
+      }
+
+      .seg {
+        display: flex;
+        gap: 4px;
+        margin-bottom: 10px;
+      }
+
+      .seg button,
+      .toggle {
+        flex: 1;
+        padding: 6px 8px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #0e1116;
+        color: var(--muted);
+        font: inherit;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      .seg button[aria-pressed='true'] {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      .toggle[aria-pressed='true'] {
+        border-color: var(--warn);
+        color: var(--warn);
+      }
+
+      ul {
+        margin: 0;
+        padding-left: 16px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      code {
+        font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+        color: var(--text);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>as-charts · M0 内核演练场</h1>
+      <p>
+        单个实例化 draw call 承载全部标记。右侧计数器直接来自
+        <code>renderer.stats()</code>，没有任何估算。
+      </p>
+    </header>
+
+    <main>
+      <canvas id="stage"></canvas>
+
+      <aside>
+        <section>
+          <h2>渲染</h2>
+          <dl id="render-stats"></dl>
+        </section>
+
+        <section>
+          <h2>帧调度器</h2>
+          <dl id="sched-stats"></dl>
+        </section>
+
+        <section>
+          <h2>GPU 资源账本</h2>
+          <dl id="res-stats"></dl>
+        </section>
+
+        <section>
+          <h2>控制</h2>
+          <label>
+            标记数量 <b id="count-label">8 000</b>
+            <input id="count" type="range" min="500" max="60000" step="500" value="8000" />
+          </label>
+
+          <div class="seg" id="fps-seg">
+            <button type="button" data-fps="auto" aria-pressed="true">跟随刷新率</button>
+            <button type="button" data-fps="60">60</button>
+            <button type="button" data-fps="30">30</button>
+            <button type="button" data-fps="10">10</button>
+          </div>
+
+          <button type="button" class="toggle" id="pause" aria-pressed="false">
+            停止写入数据（脏标记模型）
+          </button>
+        </section>
+
+        <section>
+          <h2>能力探测</h2>
+          <ul id="caps"></ul>
+        </section>
+      </aside>
+    </main>
+
+    <script type="module" src="/examples/m0-triangles/main.ts"></script>
+  </body>
+</html>

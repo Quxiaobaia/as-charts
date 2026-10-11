@@ -1,0 +1,7 @@
+dist
+coverage
+node_modules
+docs/.vitepress/cache
+docs/.vitepress/dist
+package-lock.json
+*.min.js

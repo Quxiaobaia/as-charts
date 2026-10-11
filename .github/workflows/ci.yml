@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to the same branch makes the previous run's result irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # The structural gates. These depend on nothing but Node — no GPU, no browser —
+  # which is precisely why draw-call counts, leak-free destroy() and per-frame
+  # allocation can be hard assertions rather than relative baselines.
+  check:
+    name: check (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor is set by lint-staged 17 (>=22.22.1) and vitest 5
+        # (^22.12 || ^24 || >=26); Node 20 is not viable for this toolchain.
+        node: ['22.x', '24.x']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
+      - name: Verify the published surface
+        run: node -e "import('./dist/index.mjs').then(m => { const n = Object.keys(m).length; if (n < 30) { throw new Error('only ' + n + ' exports'); } console.log('esm exports:', n); })"
+      - run: node -e "const m = require('./dist/index.cjs'); console.log('cjs exports:', Object.keys(m).length)"
+
+  # Real-GPU pixel smoke, kept in its own job on purpose: it needs a browser, and
+  # a browser is a moving part. A flaky SwiftShader must never be able to mask a
+  # structural regression in `check`.
+  e2e:
+    name: e2e (real WebGL2 via SwiftShader)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: npm
+      - run: npm ci
+      - name: Locate a browser
+        run: |
+          for candidate in /usr/bin/google-chrome /usr/bin/chromium /usr/bin/chromium-browser; do
+            if [ -x "$candidate" ]; then echo "CHROME_PATH=$candidate" >> "$GITHUB_ENV"; break; fi
+          done
+          test -n "${CHROME_PATH:-}" || { echo "no browser found"; exit 1; }
+          echo "using $CHROME_PATH"
+      - run: npm run e2e
+
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: npm
+      - run: npm ci
+      # A broken internal link is a documentation bug that ships silently, so the
+      # site is built rather than merely linted.
+      - run: npm run docs:build

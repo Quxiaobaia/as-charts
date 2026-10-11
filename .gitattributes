@@ -1,0 +1,19 @@
+# Store every text file with LF and check it out the same way.
+#
+# `core.autocrlf=true` is a common Windows default. Without this pin it would
+# check the repo out as CRLF, and `prettier --check` — which this project
+# configures with `endOfLine: "lf"` — would then fail on *every* file right
+# after a fresh clone. Pinning the eol here makes the checkout independent of
+# the machine's git config instead of depending on each contributor guessing
+# the right `core.autocrlf` value.
+* text=auto eol=lf
+
+# Binary assets must never be line-ending converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary

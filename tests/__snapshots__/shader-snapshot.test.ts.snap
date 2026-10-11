@@ -1,0 +1,123 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`triangle shader snapshots > clip-space variant 1`] = `
+"#version 300 es
+precision highp float;
+
+layout(location = 0) in vec2 aPosition;
+layout(location = 1) in vec2 aOffset;
+layout(location = 2) in vec3 aColor;
+layout(location = 3) in float aSize;
+
+uniform vec2 uResolution;
+
+out vec3 vColor;
+
+vec2 projectPoint(vec2 point, vec2 resolution) {
+  return point;
+}
+
+void main() {
+  vec2 position = aPosition * aSize + aOffset;
+  gl_Position = vec4(projectPoint(position, uResolution), 0.0, 1.0);
+  vColor = aColor;
+
+}
+"
+`;
+
+exports[`triangle shader snapshots > default variant > fragment 1`] = `
+"#version 300 es
+precision highp float;
+
+in vec3 vColor;
+out vec4 fragColor;
+
+void main() {
+  vec4 colorFragment = vec4(0.0);
+  float antiAliasFactor = 1.0;
+
+  colorFragment = vec4(vColor, 1.0);
+  antiAliasFactor = 1.0;
+
+  if (antiAliasFactor <= 0.0) discard;
+  fragColor = vec4(colorFragment.rgb, colorFragment.a * antiAliasFactor);
+}
+"
+`;
+
+exports[`triangle shader snapshots > default variant > vertex 1`] = `
+"#version 300 es
+precision highp float;
+
+layout(location = 0) in vec2 aPosition;
+layout(location = 1) in vec2 aOffset;
+layout(location = 2) in vec3 aColor;
+layout(location = 3) in float aSize;
+
+uniform vec2 uResolution;
+
+out vec3 vColor;
+
+vec2 projectPoint(vec2 point, vec2 resolution) {
+  vec2 uv = point / resolution;
+  return vec2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+}
+
+void main() {
+  vec2 position = aPosition * aSize + aOffset;
+  gl_Position = vec4(projectPoint(position, uResolution), 0.0, 1.0);
+  vColor = aColor;
+
+}
+"
+`;
+
+exports[`triangle shader snapshots > depth variant 1`] = `
+"#version 300 es
+precision highp float;
+
+layout(location = 0) in vec2 aPosition;
+layout(location = 1) in vec2 aOffset;
+layout(location = 2) in vec3 aColor;
+layout(location = 3) in float aSize;
+
+uniform vec2 uResolution;
+
+out vec3 vColor;
+
+vec2 projectPoint(vec2 point, vec2 resolution) {
+  vec2 uv = point / resolution;
+  return vec2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+}
+
+void main() {
+  vec2 position = aPosition * aSize + aOffset;
+  gl_Position = vec4(projectPoint(position, uResolution), 0.0, 1.0);
+  vColor = aColor;
+  gl_Position.z = 0.5;
+}
+"
+`;
+
+exports[`triangle shader snapshots > highlight plus opacity variant 1`] = `
+"#version 300 es
+precision highp float;
+
+in vec3 vColor;
+out vec4 fragColor;
+
+void main() {
+  vec4 colorFragment = vec4(0.0);
+  float antiAliasFactor = 1.0;
+
+  colorFragment = vec4(vColor, 1.0);
+  colorFragment.rgb = mix(colorFragment.rgb, vec3(1.0, 0.5, 0.0), 0.75);
+  colorFragment.a *= 0.4;
+  antiAliasFactor = 1.0;
+
+  if (antiAliasFactor <= 0.0) discard;
+  fragColor = vec4(colorFragment.rgb, colorFragment.a * antiAliasFactor);
+}
+"
+`;
