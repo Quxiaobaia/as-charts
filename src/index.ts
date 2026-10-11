@@ -28,6 +28,22 @@ export {
 } from './core/dirty';
 export type { DirtyFlags } from './core/dirty';
 
+export { ID_SPACE_CAPACITY, IdSpace, type IdGrant, type IdRange } from './core/IdSpace';
+
+export {
+  MutableDrawCall,
+  MutablePointSource,
+  isMergeable,
+  type DrawCall,
+  type PointSource,
+  type PointSourceKind,
+  type UniformWriter,
+} from './core/DrawCall';
+
+export { DrawList, type DrawGroup } from './core/DrawList';
+
+export { orthographicTransform, type Domain } from './core/transform';
+
 export {
   DiagnosticError,
   Diagnostics,
@@ -70,9 +86,25 @@ export {
   type CapabilityReport,
 } from './core/capabilities';
 
+export { CLIP_SPACE_GLSL, CLIP_TO_PIXEL_GLSL, PIXEL_TO_CLIP_GLSL } from './core/shader/projection';
+
 export {
-  CLIP_SPACE_GLSL,
-  PIXEL_TO_CLIP_GLSL,
+  LINE_ATTRIB,
+  LINE_FRAGMENT_SLOTS,
+  LINE_FRAGMENT_TEMPLATE,
+  LINE_VERTEX_SLOTS,
+  LINE_VERTEX_TEMPLATE,
+  buildLineShaders,
+  lineFragmentComposer,
+  lineVertexComposer,
+  type LinePointSource,
+  type LineShaderOptions,
+  type LineShaders,
+} from './core/shader/line';
+
+export { SHADING_FRAGMENT_SLOTS } from './core/shader/shading';
+
+export {
   TRIANGLE_ATTRIB,
   TRIANGLE_FRAGMENT_SLOTS,
   TRIANGLE_FRAGMENT_TEMPLATE,
@@ -90,11 +122,20 @@ export { Program, ProgramCache, ShaderCompileError, type ProgramSpec } from './r
 export {
   Renderer,
   type CanvasLike,
+  type LineLayerRequest,
   type RendererOptions,
   type RendererStats,
 } from './renderer/Renderer';
 
 export { TriangleLayer, type TriangleLayerOptions } from './layers/TriangleLayer';
+
+export {
+  LineLayer,
+  type LineLayerContext,
+  type LineLayerOptions,
+  type LineSeriesInput,
+  type LineSeriesStyle,
+} from './layers/LineLayer';
 
 // The data layer. Kept in the main entry for now; `src/data/index.ts` exists so
 // it can be split into an `as-charts/data` subpath without touching import sites.

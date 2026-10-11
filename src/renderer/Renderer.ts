@@ -7,9 +7,13 @@ import {
 } from '../core/capabilities';
 import { Diagnostics, type DiagnosticsLevel } from '../core/Diagnostics';
 import { Dirty, type DirtyFlags, DirtyAll } from '../core/dirty';
+import { DrawList } from '../core/DrawList';
 import { FrameScheduler, type SchedulerHost, type SchedulerStats } from '../core/FrameScheduler';
+import { IdSpace } from '../core/IdSpace';
 import { type ResourceSnapshot, ResourcePool } from '../core/ResourcePool';
+import { type LineShaderOptions, buildLineShaders } from '../core/shader/line';
 import { type TriangleShaderOptions, buildTriangleShaders } from '../core/shader/triangle';
+import { LineLayer, type LineLayerOptions } from '../layers/LineLayer';
 import { TriangleLayer, type TriangleLayerOptions } from '../layers/TriangleLayer';
 import { ProgramCache } from './Program';
 
@@ -72,23 +76,48 @@ export interface RendererOptions {
 
 export interface RendererStats {
   readonly frameCount: number;
+  /** GL draw calls issued by the last frame — measured, not promised. */
   readonly drawCalls: number;
+  /** Merged draw groups in the last frame's list. */
+  readonly drawGroups: number;
   readonly scheduler: SchedulerStats;
   readonly resources: ResourceSnapshot;
   readonly programs: number;
   readonly capabilities: Capabilities;
 }
 
+/**
+ * What a caller may ask for when creating a line layer.
+ *
+ * A superset of {@link LineLayerOptions}: the shader options are folded in
+ * because the data channel must be chosen once. Two separate option bags would
+ * let a caller build `attribute` geometry against a `texture` shader, which
+ * renders nothing and points at no cause.
+ */
+export interface LineLayerRequest extends LineLayerOptions {
+  /** Uniform alpha multiplier in `[0, 1]`. */
+  readonly opacity?: number;
+  /** Hover highlight blended over the per-series colour. */
+  readonly highlight?: {
+    readonly r: number;
+    readonly g: number;
+    readonly b: number;
+    readonly strength: number;
+  };
+}
+
 interface LayerBinding {
   readonly upload: () => void;
   /**
-   * Draw and report how many GL draw calls were actually issued.
+   * Append this layer's draw calls to the frame's list.
    *
-   * Returning the count rather than `void` is what keeps `stats().drawCalls`
-   * honest: a layer with no data issues nothing, and the budget must reflect GPU
-   * work rather than the number of registered layers.
+   * Layers describe *what* to draw; the `DrawList` decides how many GL calls that
+   * costs. Reporting a count from each layer, as M0 did, made the draw-call budget
+   * a per-layer promise that nobody could verify — the kernel now counts what it
+   * actually issued, which is the only number the 32-call dashboard budget can be
+   * asserted against.
    */
-  readonly draw: (width: number, height: number) => number;
+  readonly collect: (list: DrawList, width: number, height: number) => void;
   readonly dispose: () => void;
 }
 
@@ -123,6 +152,14 @@ export class Renderer {
   readonly #pool: ResourcePool;
   readonly #programCache: ProgramCache;
   readonly #scheduler: FrameScheduler;
+  readonly #drawList: DrawList;
+  /**
+   * The renderer-wide pick-id axis (C1 rule 2).
+   *
+   * Owned here rather than per layer because "point 5 of layer 0" has to be
+   * unambiguous across a canvas that may hold several charts sharing one axis.
+   */
+  readonly #ids: IdSpace;
   readonly #devicePixelRatioOption: number | boolean | undefined;
   readonly #maxPixels: number;
   /** False when the caller supplied the hub, which they also own. */
@@ -187,6 +224,8 @@ export class Renderer {
 
     this.#pool = new ResourcePool(gl);
     this.#programCache = new ProgramCache(gl, this.#pool);
+    this.#drawList = new DrawList(this.diagnostics);
+    this.#ids = new IdSpace(this.diagnostics);
     this.#scheduler = new FrameScheduler(
       {
         maxFps: options.maxFps,
@@ -238,6 +277,16 @@ export class Renderer {
 
   get resources(): ResourcePool {
     return this.#pool;
+  }
+
+  /** The renderer-wide pick-id axis. Layers claim from it; the picker will read it. */
+  get idSpace(): IdSpace {
+    return this.#ids;
+  }
+
+  /** This frame's draw list, for diagnostics. Content is valid until the next frame. */
+  get drawList(): DrawList {
+    return this.#drawList;
   }
 
   /**
@@ -294,7 +343,54 @@ export class Renderer {
       upload: () => {
         layer.upload();
       },
-      draw: (width, height) => layer.draw(program, width, height),
+      collect: (list, width, height) => {
+        layer.collect(list, program, width, height);
+      },
+      dispose: () => {
+        layer.dispose();
+        this.#programCache.release(program);
+      },
+    });
+
+    this.request(Dirty.Geometry | Dirty.Viewport);
+    return layer;
+  }
+
+  /**
+   * Create an instanced line layer sharing this context.
+   *
+   * The data channel is chosen once, here, and it selects the shader variant as
+   * well: passing `pointSource` anywhere else would let the geometry and the
+   * shader disagree about where points live, which renders nothing at all.
+   */
+  addLineLayer(options: LineLayerRequest = {}): LineLayer {
+    const pointSource = options.pointSource ?? 'attribute';
+    const shaderOptions: LineShaderOptions = {
+      pointSource,
+      opacity: options.opacity,
+      highlight: options.highlight,
+    };
+    const shaders = buildLineShaders(shaderOptions);
+    const program = this.#programCache.acquire({
+      name: shaders.vertex.name,
+      key: shaders.key,
+      vertexSource: shaders.vertex.code,
+      fragmentSource: shaders.fragment.code,
+    });
+    const layer = new LineLayer(
+      this.#gl,
+      this.#pool,
+      { ids: this.#ids, diagnostics: this.diagnostics },
+      options,
+    );
+
+    this.#bindings.push({
+      upload: () => {
+        layer.upload();
+      },
+      collect: (list, width, height) => {
+        layer.collect(list, program, width, height);
+      },
       dispose: () => {
         layer.dispose();
         this.#programCache.release(program);
@@ -334,6 +430,7 @@ export class Renderer {
     return Object.freeze({
       frameCount: this.#frameCount,
       drawCalls: this.#drawCalls,
+      drawGroups: this.#drawList.groupCount,
       scheduler: this.#scheduler.stats(),
       resources: this.#pool.snapshot(),
       programs: this.#programCache.size,
@@ -358,6 +455,8 @@ export class Renderer {
 
     for (const binding of this.#bindings) binding.dispose();
     this.#bindings.length = 0;
+    this.#drawList.clear();
+    this.#ids.clear();
     this.#programCache.dispose();
     this.#pool.releaseAll();
 
@@ -393,10 +492,11 @@ export class Renderer {
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
-    this.#drawCalls = 0;
+    this.#drawList.clear();
     for (let i = 0; i < bindings.length; i += 1) {
-      this.#drawCalls += bindings[i]?.draw(this.#width, this.#height) ?? 0;
+      bindings[i]?.collect(this.#drawList, this.#width, this.#height);
     }
+    this.#drawCalls = this.#drawList.flush(gl);
 
     this.#frameCount += 1;
   }

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { Dirty } from '../src/core/dirty';
 import { DiagnosticError, Diagnostics } from '../src/core/Diagnostics';
+import type { LineLayer } from '../src/layers/LineLayer';
 import { Renderer } from '../src/renderer/Renderer';
 import { ShaderCompileError } from '../src/renderer/Program';
 import { ALL_EXTENSIONS, createMockCanvas, createMockGL } from './utils/mock-gl';
@@ -175,6 +176,110 @@ describe('Renderer draw-call budget', () => {
     renderer.addTriangleLayer();
     renderer.addTriangleLayer({}, { opacity: 0.5 });
     expect(renderer.stats().programs).toBe(2);
+    renderer.destroy();
+  });
+});
+
+describe('Renderer · the line layer seam', () => {
+  /**
+   * Three ten-point series, so each layer owns 27 segments and 30 pick ids.
+   *
+   * Nine segments per series rather than ten keeps the arithmetic in the
+   * expectations obvious, and three series is the smallest number that shows a
+   * merge across more than a pair.
+   */
+  function addSeries(layer: LineLayer): void {
+    for (let series = 0; series < 3; series += 1) {
+      const x = new Float64Array(10);
+      const y = new Float64Array(10);
+      for (let i = 0; i < 10; i += 1) {
+        x[i] = i;
+        y[i] = series + (i % 3);
+      }
+      layer.addSeries({ x, y, color: [series / 3, 0.5, 1 - series / 3] });
+    }
+  }
+
+  it('draws every series of a line layer in one call', () => {
+    const { mock, renderer } = setup();
+    const layer = renderer.addLineLayer({ initialSegments: 64 });
+    addSeries(layer);
+
+    mock.draws.length = 0;
+    renderer.renderNow();
+
+    // The kernel counts what it issued, so this is not a per-layer promise: three
+    // descriptors, one merged group, one GL draw.
+    expect(mock.draws).toEqual([27]);
+    expect(renderer.stats().drawCalls).toBe(1);
+    expect(renderer.stats().drawGroups).toBe(1);
+    renderer.destroy();
+  });
+
+  it('draws both channels, with one program each and its own VAO', () => {
+    const { mock, renderer } = setup();
+    const attribute = renderer.addLineLayer({ pointSource: 'attribute', initialSegments: 64 });
+    const texture = renderer.addLineLayer({ pointSource: 'texture', initialSegments: 64 });
+    addSeries(attribute);
+    addSeries(texture);
+
+    mock.draws.length = 0;
+    renderer.renderNow();
+
+    // Two layers, two channels, two VAOs and two programs: two calls, 27 instances
+    // each. They must *not* merge — attribute location 1 carries a different
+    // payload in each — and the count is what proves it happened.
+    expect(mock.draws).toEqual([27, 27]);
+    expect(renderer.stats().drawCalls).toBe(2);
+    expect(renderer.stats().programs).toBe(2);
+    expect(attribute.pointSource).toBe('attribute');
+    expect(texture.pointSource).toBe('texture');
+    renderer.destroy();
+  });
+
+  it('frees the point texture the texture channel allocates', () => {
+    const { renderer } = setup();
+    const layer = renderer.addLineLayer({ pointSource: 'texture', initialSegments: 4 });
+    addSeries(layer);
+    renderer.renderNow();
+
+    // Four objects in the attribute channel (corner buffer, instance buffer, VAO,
+    // program); the texture channel adds a fifth. `destroy()` asserts cleanliness
+    // by default, so reaching the next line at all is the assertion — the explicit
+    // check is here so a future `assertClean: false` cannot turn this into a
+    // silent leak.
+    renderer.destroy();
+    expect(renderer.stats().resources.live).toBe(0);
+  });
+
+  it('claims pick ids from the renderer-wide space, not per layer', () => {
+    const { renderer } = setup();
+    const layer = renderer.addLineLayer({ initialSegments: 64 });
+    addSeries(layer);
+
+    // C1 rule 2: one axis for the whole renderer, so a second layer's ids start
+    // where the first one's ended. A per-layer space would hand out 1..30 twice,
+    // and nothing would notice until two layers existed.
+    expect(renderer.idSpace.live).toBe(30);
+    const other = renderer.addLineLayer({ initialSegments: 8 });
+    other.addSeries({ x: Float64Array.from([0, 1]), y: Float64Array.from([0, 1]) });
+    expect(renderer.idSpace.live).toBe(32);
+    renderer.destroy();
+  });
+
+  it('stops uploading once the line geometry is stable', () => {
+    const { mock, renderer } = setup();
+    const layer = renderer.addLineLayer({ initialSegments: 64 });
+    addSeries(layer);
+    renderer.renderNow();
+
+    const after = mock.counts['bufferSubData'] ?? 0;
+    expect(after).toBeGreaterThan(0);
+    renderer.renderNow();
+    // A second frame with nothing changed must not re-push instance bytes; the
+    // upload stage is gated on a dirty flag, and a gate that never closes is the
+    // difference between a steady-state chart and one that uploads forever.
+    expect(mock.counts['bufferSubData'] ?? 0).toBe(after);
     renderer.destroy();
   });
 });

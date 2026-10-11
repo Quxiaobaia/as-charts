@@ -1,4 +1,6 @@
 import type { ResourcePool } from '../core/ResourcePool';
+import { MutableDrawCall, type UniformWriter } from '../core/DrawCall';
+import type { DrawList } from '../core/DrawList';
 import type { Program } from '../renderer/Program';
 import { TRIANGLE_ATTRIB } from '../core/shader/triangle';
 
@@ -9,6 +11,16 @@ const INSTANCE_STRIDE_FLOATS = 6; // offsetX, offsetY, r, g, b, size
 const CORNER_VERTICES = new Float32Array([-1, -1, 1, -1, 0, 1]);
 
 const CAPACITY_GROWTH = 1.5;
+
+/** Writes the one uniform a triangle draw needs. Owned by the layer, reused. */
+class TriangleUniforms implements UniformWriter {
+  width = 0;
+  height = 0;
+
+  write(program: Program): void {
+    program.setVec2('uResolution', this.width, this.height);
+  }
+}
 
 export interface TriangleLayerOptions {
   /** Initial instance capacity. Avoids a rebuild right after construction. */
@@ -28,7 +40,10 @@ export interface TriangleLayerOptions {
  *    1.5× and the growth is amortised.
  * 2. `upload()` pushes bytes to the GPU only when something changed, using
  *    `bufferSubData` so the driver can keep the existing allocation.
- * 3. `draw()` sets one uniform and issues one `drawArraysInstanced`.
+ * 3. `collect()` hands the renderer one `DrawCall` describing the whole layer —
+ *    one instance buffer, one uniform writer, one draw. It does not issue GL
+ *    calls itself; `DrawList` owns that, so the draw-call budget stays a kernel
+ *    measurement rather than a per-layer promise.
  *
  * One non-obvious trap is handled explicitly. A VAO captures the *buffer binding*
  * and the attribute pointers, so recreating the instance buffer on growth
@@ -49,6 +64,9 @@ export class TriangleLayer {
   #capacity: number;
   #count = 0;
   #uploadPending = false;
+
+  readonly #uniforms = new TriangleUniforms();
+  readonly #drawCall = new MutableDrawCall();
 
   constructor(gl: WebGL2RenderingContext, pool: ResourcePool, options: TriangleLayerOptions = {}) {
     this.#gl = gl;
@@ -83,6 +101,17 @@ export class TriangleLayer {
 
     gl.bindVertexArray(null);
     gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+    const call = this.#drawCall;
+    call.vao = this.#vao;
+    call.mode = gl.TRIANGLES;
+    call.vertexCount = CORNER_VERTICES.length / 2;
+    call.uniforms = this.#uniforms;
+    call.pointSource.setAttribute(this.#instanceBuffer);
+    // Triangles are not pickable in M0, so they claim no ids. `count: 0` says
+    // that explicitly: C1 rule 4 makes `idCount = 1` mean "series-level picking",
+    // which is a different statement from "this entity cannot be picked".
+    call.idRange = { first: 0, count: 0 };
   }
 
   /** Number of instances currently drawn. */
@@ -200,22 +229,23 @@ export class TriangleLayer {
   }
 
   /**
-   * Issue the single instanced draw call for this layer.
+   * Queue this layer's draw call.
    *
-   * @returns the number of GL draw calls issued — `1`, or `0` for an empty layer.
-   *   Reporting the count instead of `void` is what lets the renderer's draw-call
-   *   budget measure GPU work rather than registered layers, so an empty chart
-   *   costs zero calls and the 32-call dashboard budget stays meaningful.
+   * The seam is the same one the line pipeline uses: the layer describes *what*
+   * to draw and `DrawList` decides how many GL calls that costs. An empty layer
+   * queues nothing, so it costs zero calls — reporting a count rather than
+   * `void` is what keeps the renderer's draw-call budget a measurement of GPU
+   * work rather than a count of registered layers.
    */
-  draw(program: Program, width: number, height: number): number {
-    if (this.#count === 0) return 0;
-    const gl = this.#gl;
-    program.use();
-    program.setVec2('uResolution', width, height);
-    gl.bindVertexArray(this.#vao);
-    gl.drawArraysInstanced(gl.TRIANGLES, 0, CORNER_VERTICES.length / 2, this.#count);
-    gl.bindVertexArray(null);
-    return 1;
+  collect(list: DrawList, program: Program, width: number, height: number): void {
+    if (this.#count === 0) return;
+    this.#uniforms.width = width;
+    this.#uniforms.height = height;
+    const call = this.#drawCall;
+    call.program = program;
+    call.instanceFirst = 0;
+    call.instanceCount = this.#count;
+    list.add(call);
   }
 
   dispose(): void {
@@ -282,6 +312,7 @@ export class TriangleLayer {
     const gl = this.#gl;
     this.#pool.release(this.#instanceBuffer);
     this.#instanceBuffer = this.#createInstanceBuffer();
+    this.#drawCall.pointSource.setAttribute(this.#instanceBuffer);
     gl.bindVertexArray(this.#vao);
     this.#bindInstanceAttributes();
     gl.bindVertexArray(null);

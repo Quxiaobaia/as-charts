@@ -187,11 +187,23 @@
 
 三条契约是实现目标，不是既成事实。落地位置：
 
-| 契约 | 计划落地位置                                         | 里程碑 |
-| ---- | ---------------------------------------------------- | ------ |
-| C1   | `src/renderer/Picker.ts`、各 `Series` 的 id 领用     | M2     |
-| C2   | `src/core/DrawCall.ts`、`src/series/LineRenderer.ts` | M1-b   |
-| C3   | `src/shell/Axis.ts`、`src/shell/Chart.ts`            | M1-c   |
+| 契约 | 计划落地位置                                                                                        | 里程碑    |
+| ---- | --------------------------------------------------------------------------------------------------- | --------- |
+| C1   | **分配半边**：`src/core/IdSpace.ts`；**读回半边**：`src/renderer/Picker.ts`、各 `Series` 的 id 领用 | M1-b / M2 |
+| C2   | `src/core/DrawCall.ts`、`src/core/DrawList.ts`、`src/layers/LineLayer.ts`                           | M1-b ✅   |
+| C3   | `src/shell/Axis.ts`、`src/shell/Chart.ts`                                                           | M1-c      |
 
-`DrawCall` 描述符（C2）在 M1-b 落地时会成为第一次真正的检验 ——
-两条通道要在这里被证明可以共用一套描述。
+**C2 在 M1-b 落地，并且真的经受了它被设计出来要经受的那次检验**：两条数据通道共用同一套描述符，
+`isMergeable` 逐字段比较（而不是相信生产者给的一个 key），单系列恒为 1 次 draw call。
+三条契约的强制执行结果：
+
+- **C1 规则 4/5 迫使 id 区间被真正分配**，而不是编造一个看起来对的区间。因此 `IdSpace` 的
+  **分配半边提前**到 M1-b：一个编造的区间在所有单测里都正确，直到出现第二个图层为止。
+  读回（`Picker`）留在 M2 —— 那才是需要 framebuffer 的一半。
+- **C1 规则 1（0 恒未命中）由构造保证**：自由链从 1 开始，`allocate` 永远够不到 0。
+  空间耗尽时**降级到系列级拾取**（`count: 1`），不环绕 —— 环绕会让 id 指向**另一个实体**。
+- **C2 规则 7（描述符不说画在哪儿）**带来一条必须写下来的不变量：一次 `flush` 只能发生在一个
+  布局区域内。M1-c 的 `Layout` 会为每个区域持有一个 `DrawList`，或在区域之间 flush；
+  跨 `scissor` 变更的列表会把第二个图的几何画进第一个图的视口。
+- **C2 的 `instanceFirst` 不是元数据，是校验位**：WebGL2 没有 `baseInstance`，
+  所以合并后的 run 只有从实例 0 开始才可绘制（见 `DrawCall.ts` 的说明）。

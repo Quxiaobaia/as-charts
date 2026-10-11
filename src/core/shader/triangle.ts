@@ -5,6 +5,8 @@ import {
   ShaderComposer,
   slotMarker,
 } from '../ShaderComposer';
+import { CLIP_SPACE_GLSL, PIXEL_TO_CLIP_GLSL } from './projection';
+import { SHADING_FRAGMENT_SLOTS } from './shading';
 
 /**
  * The M0 triangle pipeline's shader definition.
@@ -37,21 +39,19 @@ export const TRIANGLE_ATTRIB = {
 } as const;
 
 /**
- * Pixel-space → clip-space helper, written into the `transform` position.
- *
- * Input coordinates follow the canvas convention (origin top-left, **y down**),
- * which is also the convention of mouse events, so picking and hit-testing need
- * no flip. The projection flips y once, here, and nowhere else.
+ * The projection pair is shared with the line pipeline — see
+ * `./projection.ts`, which owns both directions and the "flip y exactly once"
+ * invariant. Re-exported here because this module's public surface predates the
+ * extraction and callers import it from here.
  */
-export const PIXEL_TO_CLIP_GLSL = `vec2 projectPoint(vec2 point, vec2 resolution) {
-  vec2 uv = point / resolution;
-  return vec2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
-}`;
+export { CLIP_SPACE_GLSL, PIXEL_TO_CLIP_GLSL };
 
-/** Identity projection, for callers that already work in clip space. */
-export const CLIP_SPACE_GLSL = `vec2 projectPoint(vec2 point, vec2 resolution) {
-  return point;
-}`;
+/**
+ * The fragment wells are shared with the line pipeline — see `./shading.ts` for
+ * why the ordering-critical `color.*` slots live in one place. Re-exported under
+ * this module's historical name.
+ */
+export const TRIANGLE_FRAGMENT_SLOTS = SHADING_FRAGMENT_SLOTS;
 
 export const TRIANGLE_VERTEX_TEMPLATE = `#version 300 es
 precision highp float;
@@ -105,43 +105,6 @@ export const TRIANGLE_VERTEX_SLOTS: Readonly<Record<string, ShaderSlot>> = {
   depth: {
     at: 'depth',
     code: '  gl_Position.z = {{depth}};',
-  },
-};
-
-export const TRIANGLE_FRAGMENT_SLOTS: Readonly<Record<string, ShaderSlot>> = {
-  'color.base': {
-    at: 'colorFragment',
-    code: '  colorFragment = vec4(vColor, 1.0);',
-  },
-  /**
-   * Blend the base colour toward a highlight colour.
-   *
-   * `requires: ['color.base']` is load-bearing: it is what guarantees the base
-   * assignment is emitted before this mix, so enabling highlight cannot produce a
-   * blend against a zero-initialised colour.
-   */
-  'color.highlight': {
-    at: 'colorFragment',
-    requires: ['color.base'],
-    code: '  colorFragment.rgb = mix(colorFragment.rgb, vec3({{r}}, {{g}}, {{b}}), {{strength}});',
-  },
-  /** Multiplies alpha, so it must also run after the base assignment. */
-  'color.opacity': {
-    at: 'colorFragment',
-    requires: ['color.base'],
-    code: '  colorFragment.a *= {{opacity}};',
-  },
-  /**
-   * The default for the `antiAlias` well: no coverage falloff.
-   *
-   * M0 geometry is axis-aligned triangles, which need no analytic AA. The
-   * position exists now so that line rendering (M1) can add `antiAlias.edge`
-   * using screen-space derivatives **without editing the fragment template** —
-   * the reason a public well is worth reserving before it has two occupants.
-   */
-  'antiAlias.off': {
-    at: 'antiAlias',
-    code: '  antiAliasFactor = 1.0;',
   },
 };
 

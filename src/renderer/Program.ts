@@ -154,6 +154,20 @@ export class Program {
     if (location != null) this.#gl.uniform3f(location, x, y, z);
   }
 
+  /**
+   * A 4×4 matrix, column-major as GL expects.
+   *
+   * The line pipeline composes its data → clip mapping as a matrix rather than as
+   * four scalars because the RTC local-origin chunk (M1-d) prepends a translation
+   * and the two must compose in a defined order. A scalar pair cannot express
+   * that composition, and rewriting every call site later is exactly the kind of
+   * retrofit the contracts exist to avoid.
+   */
+  setMat4(name: string, value: Float32Array | number[]): void {
+    const location = this.#uniforms.get(name);
+    if (location != null) this.#gl.uniformMatrix4fv(location, false, value);
+  }
+
   dispose(): void {
     this.#uniforms.clear();
     this.#pool.release(this.handle);

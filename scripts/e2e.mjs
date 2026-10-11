@@ -5,8 +5,13 @@
  * structural gates cheap and deterministic — but a mock cannot tell you that the
  * composed GLSL compiles, that the VAO captured the instance attributes, or that
  * the projection put pixels where the caller asked. This runner boots the dev
- * server, drives `tests/e2e/pipeline.html` in headless Chrome (SwiftShader when
- * no GPU is available) and fails if the page's self-reported checks fail.
+ * server, drives each page listed below in headless Chrome (SwiftShader when no
+ * GPU is available) and fails if any page's self-reported checks fail.
+ *
+ * One page per claim, rather than one page doing everything: a failure then names
+ * the artefact that broke instead of reporting "the pipeline page failed". Both
+ * pages share the `#result` contract, so adding a page is one entry here and one
+ * HTML file next to it.
  *
  * It is deliberately *not* part of `npm run check`: it needs a browser, and a
  * browser is a moving part. `check` must never depend on one.
@@ -17,7 +22,7 @@ import process from 'node:process';
 import { createServer } from 'vite';
 
 const PORT = 5179;
-const PAGE = 'tests/e2e/pipeline.html';
+const PAGES = ['tests/e2e/pipeline.html', 'tests/e2e/line.html'];
 const TIMEOUT_MS = 60_000;
 
 /** First existing candidate wins; `CHROME_PATH` overrides everything. */
@@ -119,19 +124,23 @@ try {
   await server.listen();
   const origin = server.resolvedUrls?.local?.[0];
   if (origin === undefined) throw new Error('the dev server reported no local address');
-  const url = new URL(PAGE, origin).href;
-  console.log(`e2e: ${url}`);
   console.log(`e2e: browser ${browser}`);
 
-  const { stdout, stderr } = await runBrowser(browser, url);
-  const { status, payload } = extract(stdout);
+  for (const page of PAGES) {
+    const url = new URL(page, origin).href;
+    console.log(`e2e: ${url}`);
 
-  if (status === undefined || payload === undefined) {
-    console.error('e2e: the page produced no result. Browser stderr follows:');
-    console.error(stderr.trim());
-    exitCode = 1;
-  } else {
-    console.log(`e2e: reported ${status.toUpperCase()}`);
+    const { stdout, stderr } = await runBrowser(browser, url);
+    const { status, payload } = extract(stdout);
+
+    if (status === undefined || payload === undefined) {
+      console.error(`e2e: ${page} produced no result. Browser stderr follows:`);
+      console.error(stderr.trim());
+      exitCode = 1;
+      continue;
+    }
+
+    console.log(`e2e: ${page} reported ${status.toUpperCase()}`);
     try {
       const report = JSON.parse(payload);
       for (const [key, value] of Object.entries(report.checks ?? {})) {

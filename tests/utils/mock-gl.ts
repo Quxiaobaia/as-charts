@@ -20,7 +20,9 @@ const GL = {
   STATIC_DRAW: 0x88e4,
   DYNAMIC_DRAW: 0x88e8,
   FLOAT: 0x1406,
+  UNSIGNED_INT: 0x1405,
   TRIANGLES: 0x0004,
+  TRIANGLE_STRIP: 0x0005,
   COLOR_BUFFER_BIT: 0x4000,
   COMPILE_STATUS: 0x8b81,
   LINK_STATUS: 0x8b82,
@@ -32,6 +34,16 @@ const GL = {
   MAX_VERTEX_ATTRIBS: 0x8869,
   MAX_SAMPLES: 0x8d57,
   TEXTURE_MAX_ANISOTROPY_EXT: 0x84ff,
+  TEXTURE_2D: 0x0de1,
+  TEXTURE0: 0x84c0,
+  TEXTURE_MIN_FILTER: 0x2801,
+  TEXTURE_MAG_FILTER: 0x2800,
+  TEXTURE_WRAP_S: 0x2802,
+  TEXTURE_WRAP_T: 0x2803,
+  NEAREST: 0x2600,
+  CLAMP_TO_EDGE: 0x812f,
+  RG32F: 0x8230,
+  RG: 0x8227,
 } as const;
 
 export interface MockGLOptions {
@@ -60,6 +72,12 @@ export interface MockCall {
   readonly args: readonly unknown[];
 }
 
+export interface TextureAllocation {
+  readonly width: number;
+  readonly height: number;
+  readonly texels: number;
+}
+
 export interface MockGL {
   readonly gl: WebGL2RenderingContext;
   readonly calls: MockCall[];
@@ -70,7 +88,13 @@ export interface MockGL {
   readonly draws: number[];
   /** Upload sizes in bytes, in call order. */
   readonly uploads: number[];
+  /** Every `texImage2D` allocation, so a channel's storage can be asserted on. */
+  readonly textures: TextureAllocation[];
+  /** Every `texSubImage2D` region, in call order. */
+  readonly subImages: readonly { readonly width: number; readonly height: number }[];
   clearCalls(): void;
+  /** Reset the texture logs, e.g. after construction. */
+  clearTextureLog(): void;
 }
 
 export function createMockGL(options: MockGLOptions = {}): MockGL {
@@ -81,6 +105,8 @@ export function createMockGL(options: MockGLOptions = {}): MockGL {
   const deleted: Record<string, number> = {};
   const draws: number[] = [];
   const uploads: number[] = [];
+  const textures: TextureAllocation[] = [];
+  const subImages: { width: number; height: number }[] = [];
 
   const extensions = new Set(options.extensions ?? []);
   const parameters: Record<number, number> = {
@@ -212,6 +238,12 @@ export function createMockGL(options: MockGLOptions = {}): MockGL {
       bump('uniform3f');
       if (record) calls.push({ name: 'uniform3f', args: [location, x, y, z] });
     },
+    uniformMatrix4fv(location: unknown, transpose: boolean, value: ArrayLike<number>) {
+      bump('uniformMatrix4fv');
+      if (record) {
+        calls.push({ name: 'uniformMatrix4fv', args: [location, transpose, Array.from(value)] });
+      }
+    },
 
     // ---- buffers ----
     createBuffer() {
@@ -250,7 +282,13 @@ export function createMockGL(options: MockGLOptions = {}): MockGL {
           : length * ((data as { BYTES_PER_ELEMENT?: number }).BYTES_PER_ELEMENT ?? 1);
       bump('bufferSubData');
       if (record) {
-        calls.push({ name: 'bufferSubData', args: [target, offset, bytes] });
+        // The source view is recorded as `args[3]` so a test can read the bytes
+        // that went to the GPU. `args[0..2]` keep their original meaning, so
+        // existing assertions on size and destination are unaffected.
+        calls.push({
+          name: 'bufferSubData',
+          args: [target, offset, bytes, data, srcOffset, length],
+        });
         uploads.push(bytes);
       }
     },
@@ -284,6 +322,22 @@ export function createMockGL(options: MockGLOptions = {}): MockGL {
       offset: number,
     ) {
       note('vertexAttribPointer', [index, size, type, normalized, stride, offset]);
+    },
+    /**
+     * Integer attributes take a separate entry point.
+     *
+     * `vertexAttribPointer` converts to float, which cannot hold an id above
+     * 2^24 exactly — so the line pipeline uses `uint` attributes for ids and flat
+     * texture indices, and the mock must record that it did.
+     */
+    vertexAttribIPointer(
+      index: number,
+      size: number,
+      type: number,
+      stride: number,
+      offset: number,
+    ) {
+      note('vertexAttribIPointer', [index, size, type, stride, offset]);
     },
     vertexAttribDivisor(index: number, divisor: number) {
       note('vertexAttribDivisor', [index, divisor]);
@@ -325,7 +379,7 @@ export function createMockGL(options: MockGLOptions = {}): MockGL {
       return parameters[pname] ?? null;
     },
 
-    // ---- textures (unused in M0, present so future layers fail loudly) ----
+    // ---- textures ----
     createTexture() {
       note('createTexture', []);
       return handle('texture');
@@ -333,6 +387,40 @@ export function createMockGL(options: MockGLOptions = {}): MockGL {
     deleteTexture(texture: unknown) {
       note('deleteTexture', [texture]);
       deleted.texture = (deleted.texture ?? 0) + 1;
+    },
+    activeTexture(unit: number) {
+      bump('activeTexture');
+      if (record) calls.push({ name: 'activeTexture', args: [unit] });
+    },
+    bindTexture(target: number, texture: unknown) {
+      bump('bindTexture');
+      if (record) calls.push({ name: 'bindTexture', args: [target, texture] });
+    },
+    texParameteri(target: number, pname: number, param: number) {
+      note('texParameteri', [target, pname, param]);
+    },
+    /**
+     * Allocation, so off the hot path — except that the data channel's upload
+     * path reaches it whenever the texture has to grow, which is why the args are
+     * recorded as a structured entry rather than a raw argument list.
+     *
+     * Both overloads are accepted; the nine-argument form carries `srcOffset`, so
+     * the engine can hand over a full-size array without materialising a
+     * `subarray` view per frame.
+     */
+    texImage2D(...args: unknown[]) {
+      bump('texImage2D');
+      const width = typeof args[3] === 'number' ? args[3] : 0;
+      const height = typeof args[4] === 'number' ? args[4] : 0;
+      textures.push({ width, height, texels: width * height });
+      if (record) calls.push({ name: 'texImage2D', args });
+    },
+    texSubImage2D(...args: unknown[]) {
+      bump('texSubImage2D');
+      const width = typeof args[4] === 'number' ? args[4] : 0;
+      const height = typeof args[5] === 'number' ? args[5] : 0;
+      subImages.push({ width, height });
+      if (record) calls.push({ name: 'texSubImage2D', args });
     },
     createFramebuffer() {
       note('createFramebuffer', []);
@@ -360,8 +448,14 @@ export function createMockGL(options: MockGLOptions = {}): MockGL {
     deleted,
     draws,
     uploads,
+    textures,
+    subImages,
     clearCalls() {
       calls.length = 0;
+    },
+    clearTextureLog() {
+      textures.length = 0;
+      subImages.length = 0;
     },
   };
 }
@@ -374,6 +468,9 @@ export const ALL_EXTENSIONS = [
   'EXT_disjoint_timer_query_webgl2',
   'EXT_texture_filter_anisotropic',
 ] as const;
+
+/** The GL constants the mock answers on. Exported so tests can preset parameters. */
+export const MOCK_GL_CONSTANTS = GL;
 
 export interface MockCanvas {
   readonly canvas: HTMLCanvasElement;

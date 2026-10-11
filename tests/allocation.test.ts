@@ -20,6 +20,19 @@ import { ALL_EXTENSIONS, createMockCanvas, createMockGL } from './utils/mock-gl'
  */
 
 describe('per-frame allocation', () => {
+  it('measures with forced collection available', () => {
+    // Guards the guard, twice over. `allocation.test.ts` already proves the
+    // measurement can *detect* allocation; this proves it is running in the mode
+    // where its readings mean anything at all.
+    //
+    // Without `--expose-gc` the differential measurement is dominated by garbage
+    // that happens to survive into the "after" reading, and the very same
+    // non-allocating closure was observed reading 0, 33, 63 and 74 bytes per
+    // iteration across runs. A silent fallback to that mode is worse than a loud
+    // failure: it does not merely lose sensitivity, it inverts it.
+    expect(typeof (globalThis as { gc?: unknown }).gc).toBe('function');
+  });
+
   it('allocates nothing measurable across a rendered frame', () => {
     const mock = createMockGL({ extensions: ALL_EXTENSIONS, record: false });
     const mockCanvas = createMockCanvas(mock);
