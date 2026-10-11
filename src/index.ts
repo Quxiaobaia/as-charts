@@ -96,5 +96,42 @@ export {
 
 export { TriangleLayer, type TriangleLayerOptions } from './layers/TriangleLayer';
 
+// The data layer. Kept in the main entry for now; `src/data/index.ts` exists so
+// it can be split into an `as-charts/data` subpath without touching import sites.
+export {
+  DataSet,
+  MinmaxWorkspace,
+  RingBuffer,
+  assertLogDomain,
+  categoryScale,
+  categoryTicks,
+  classify,
+  computeBounds,
+  createScale,
+  describeSkips,
+  linearTicks,
+  logTicks,
+  minmaxDownsample,
+  reportSkips,
+  scaleOver,
+  tickStep,
+  timeTicks,
+  type Bounds,
+  type BoundsOptions,
+  type BoundsResult,
+  type DownsampleResult,
+  type MinmaxOptions,
+  type SampleSkipKind,
+  type Scale,
+  type ScaleKind,
+  type ScaleOptions,
+  type SkipAxis,
+  type SkipDiagnostic,
+  type SkipKind,
+  type TickSet,
+  type TimeUnit,
+  type Vec,
+} from './data/index';
+
 /** Library version, replaced at build time by the bundler. */
 export const VERSION = '0.0.0';
